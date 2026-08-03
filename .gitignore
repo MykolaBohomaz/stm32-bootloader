@@ -1,0 +1,70 @@
+# Build directories
+build/
+out/
+bin/
+dist/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+install_manifest.txt
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+
+# Object files
+*.o
+*.obj
+*.d
+
+# Libraries
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+
+# Executables
+*.elf
+*.axf
+*.out
+*.exe
+*.hex
+*.map
+
+# Debug files
+*.pdb
+*.dSYM/
+
+# Coverage
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# VS Code
+.vscode/
+
+# CLion / IntelliJ
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

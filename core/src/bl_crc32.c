@@ -1,7 +1,12 @@
 #include "bl_crc32.h"
 #include <stdint.h>
 
-
+/*
+ * Calculate CRC-32 over a byte sequence.
+ *
+ * This implementation uses the reflected CRC-32 polynomial:
+ *     0xEDB88320
+ */
 
 uint32_t bl_crc32(uint32_t crc, const void *data, size_t len){
   crc = ~crc;

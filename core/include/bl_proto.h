@@ -28,6 +28,8 @@
 /* Firmware image slots. */
 #define BL_SLOT_A 0
 #define BL_SLOT_B 1
+#define BL_SLOT_COUNT 2u
+#define BL_META_COUNT 2u
 
 /*
  * Firmware image header.

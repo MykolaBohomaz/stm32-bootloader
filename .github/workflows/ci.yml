@@ -1,14 +1,19 @@
 ---
 name: CI
 
-
 on:
   push:
   pull_request:
 
 jobs:
-  build:
+  # -------------------------------------------------------------------------
+  # Build the host configuration and run the unit tests under
+  # AddressSanitizer and UndefinedBehaviorSanitizer.
+  # -------------------------------------------------------------------------
+  build-and-test:
+    name: Build and test (host)
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,5 +24,97 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      # --output-on-failure prints the failing assertion instead of only
+      # reporting which test failed.
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+  # -------------------------------------------------------------------------
+  # Enforce that core/ stays hardware-independent.
+  #
+  # Comments mentioning STM32 are allowed; only real code
+  # dependencies are rejected.
+  # -------------------------------------------------------------------------
+  layering:
+    name: core/ is hardware-independent
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # grep exits 1 when it finds nothing, which is the success case here,
+      # so the check is wrapped in `if` rather than run bare under `set -e`.
+      - name: No hardware headers in core/
+        run: |
+          pattern='#include[[:space:]]*[<"](stm32|core_cm|cmsis)'
+          if grep -rnE "$pattern" core/; then
+            echo "::error::core/ must not include hardware headers"
+            exit 1
+          fi
+
+      - name: No HAL calls in core/
+        run: |
+          if grep -rnE '\bHAL_[A-Za-z]' core/; then
+            echo "::error::core/ must not call STM32 HAL functions"
+            exit 1
+          fi
+
+      # port/host exists to be swapped out for a real target port. If core/
+      # reaches into it directly, the seam is gone.
+      - name: No port implementation details in core/
+        run: |
+          if grep -rnE '#include[[:space:]]*"bl_port_host\.h"' core/; then
+            echo "::error::core/ must use bl_port.h, not a port implementation"
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------------
+  # The Python tooling must at least parse. mkimage.py defines the image
+  # format that the C side reads, so a syntax error here is a broken build
+  # even though no C code depends on it.
+  # -------------------------------------------------------------------------
+  python-tools:
+    name: Python tools
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Byte-compile tools
+        run: python -m compileall -q tools/
+
+      # End-to-end check: build an image and verify the header the C side
+      # expects. Catches drift between mkimage.py and bl_proto.h.
+      - name: mkimage produces a valid header
+        run: |
+          head -c 4096 /dev/urandom > /tmp/app.bin
+          python3 tools/mkimage.py /tmp/app.bin --version 1.2.3
+          python3 - <<'PY'
+          import struct, zlib, sys
+
+          data = open('/tmp/app.blimg', 'rb').read()
+          if len(data) < 40:
+              sys.exit('image shorter than the 40-byte header')
+
+          (magic, hdr_ver, flags, img_size,
+           img_crc, fw_ver, entry, _, hdr_crc) = struct.unpack(
+              '<IHHIIII12sI', data[:40])
+          payload = data[40:]
+
+          assert magic == 0x4D494C42, f'bad magic {magic:#x}'
+          assert hdr_ver == 1, f'bad header version {hdr_ver}'
+          assert img_size == len(payload), f'{img_size} != {len(payload)}'
+          assert img_size % 8 == 0, 'payload not padded to a granule'
+          assert img_crc == zlib.crc32(payload) & 0xFFFFFFFF, 'bad img CRC'
+          assert hdr_crc == zlib.crc32(data[:36]) & 0xFFFFFFFF, 'bad hdr CRC'
+          assert fw_ver == 0x00010203, f'bad version {fw_ver:#x}'
+
+          print('image header OK:', len(data), 'bytes')
+          PY

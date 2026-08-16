@@ -71,12 +71,12 @@ bl_frame_status_t bl_frame_feed(bl_frame_parser_t *p, uint8_t byte){
         p->running_crc = bl_crc32(p->running_crc, &byte, 1);
 
         if(p->byte_count == 0){
-          p->frame.len |= byte; 
+          p->frame.len = byte;
           p->byte_count++;
         }
 
         else{
-          p->frame.len |= ((uint16_t)byte << 8);
+          p->frame.len = (uint16_t)(p->frame.len | ((uint16_t)byte << 8));
 
           /*
            * Length originates from the external transport, so it must
@@ -184,8 +184,8 @@ size_t bl_frame_encode(uint8_t cmd, const void *payload, uint16_t len,
   out[1] = cmd;
 
   /* 16-bit payload length, encoded little-endian. */
-  out[2] = len & 0xFF;
-  out[3] = (len >> 8) & 0xFF;
+  out[2] = (uint8_t)(len & 0xFFu);
+  out[3] = (uint8_t)((len >> 8) & 0xFFu);
 
   if(len > 0){
     memcpy(&out[4], payload, len);
@@ -195,9 +195,9 @@ size_t bl_frame_encode(uint8_t cmd, const void *payload, uint16_t len,
   crc = bl_crc32(crc, out + 1, len + 3);
 
   /* Store CRC as a 32-bit little-endian value. */
-  out[4 + len] = crc & 0xFF;
-  out[5 + len] = (crc >> 8) & 0xFF;
-  out[6 + len] = (crc >> 16) & 0xFF;
-  out[7 + len] = (crc >> 24) & 0xFF;
+  out[4 + len] = (uint8_t)(crc & 0xFFu);
+  out[5 + len] = (uint8_t)((crc >> 8) & 0xFFu);
+  out[6 + len] = (uint8_t)((crc >> 16) & 0xFFu);
+  out[7 + len] = (uint8_t)((crc >> 24) & 0xFFu);
   return 8 + len;
 }

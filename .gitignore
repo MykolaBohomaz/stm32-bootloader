@@ -54,6 +54,11 @@ __pycache__/
 .venv/
 venv/
 
+# clangd / ccls index cache
+.cache/
+.clangd/
+compile_commands.json
+
 # VS Code
 .vscode/
 

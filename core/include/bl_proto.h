@@ -32,6 +32,29 @@
 #define BL_META_COUNT 2u
 
 /*
+ * Reserved header region size.
+ *
+ * An image occupies a slot as:
+ *
+ *     slot_base + 0                    image header
+ *     slot_base + BL_IMG_HDR_REGION    firmware payload
+ *
+ * The payload begins with the application's Cortex-M vector table, and
+ * SCB->VTOR can only address a table aligned to the next power of two at
+ * or above the table's size, with an architectural minimum of 128 bytes.
+ * The largest supported target's vector table is under 512 bytes, so a
+ * 512-byte header region keeps the payload correctly aligned in every
+ * slot whose base is itself 512-byte aligned.
+ *
+ * Bytes between the header and the payload are padding and are not
+ * covered by either checksum.
+ */
+#define BL_IMG_HDR_REGION 512u
+
+/* Minimum architectural alignment for SCB->VTOR on ARMv7-M. */
+#define BL_VTOR_MIN_ALIGNMENT 128u
+
+/*
  * Firmware image header.
  *
  * The header is stored at the beginning of a firmware image and
@@ -46,7 +69,7 @@ typedef struct {
     uint32_t img_size;    /* Firmware image size in bytes. */
     uint32_t img_crc32;   /* CRC-32 of the firmware image. */
     uint32_t fw_version;  /* Firmware version. */
-    uint32_t entry_offset;/* Entry point offset within the image. */
+    uint32_t entry_offset;/* Payload offset from the slot base, in bytes. */
     uint8_t  reserved[12];/* Reserved for future format extensions. */
     uint32_t hdr_crc32;   /* CRC-32 of the header metadata. */
 } bl_img_hdr_t;
@@ -57,6 +80,19 @@ typedef struct {
  */
 _Static_assert(sizeof(bl_img_hdr_t) == 40, "header size changed");
 _Static_assert(offsetof(bl_img_hdr_t, hdr_crc32) == 36, "header layout changed");
+
+/*
+ * Constraints on the header region. The bootloader reads the payload
+ * offset from entry_offset rather than assuming BL_IMG_HDR_REGION, so an
+ * image built with a larger header region remains bootable; these
+ * assertions constrain the value this build produces and accepts.
+ */
+_Static_assert(BL_IMG_HDR_REGION >= sizeof(bl_img_hdr_t),
+               "header region cannot hold the image header");
+_Static_assert((BL_IMG_HDR_REGION & (BL_IMG_HDR_REGION - 1u)) == 0u,
+               "header region must be a power of two for VTOR alignment");
+_Static_assert(BL_IMG_HDR_REGION >= BL_VTOR_MIN_ALIGNMENT,
+               "header region below the architectural VTOR alignment");
 
 /*
  * Commands accepted by the bootloader.

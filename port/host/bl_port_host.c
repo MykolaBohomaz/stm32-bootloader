@@ -32,6 +32,13 @@
 #define HOST_WRITE_GRANULARITY      8u
 #define HOST_ERASE_GRANULARITY      2048u
 
+/*
+ * Alignment required of an application vector table on the modelled
+ * target. Matches BL_IMG_HDR_REGION so that an image placed at
+ * slot_base + BL_IMG_HDR_REGION satisfies it.
+ */
+#define HOST_VTOR_ALIGNMENT         BL_IMG_HDR_REGION
+
 #define HOST_RX_CAPACITY            4096u
 #define HOST_TX_CAPACITY            4096u
 
@@ -177,15 +184,28 @@ static void flash_mark_erased(uint32_t offset)
 /*
  * Locate the slot containing addr. If requested, return that slot's size.
  */
-static bool find_slot_for_address(uint32_t addr, uint32_t *slot_size_out)
+/*
+ * Locate the slot containing addr and report that slot's extent.
+ *
+ * The application base is offset from the slot base by the image header
+ * region, so the slot bounds are reported rather than derived from the
+ * supplied address.
+ */
+static bool find_slot_for_address(uint32_t addr,
+                                  uint32_t *slot_base_out,
+                                  uint32_t *slot_end_out)
 {
     for (uint32_t i = 0u; i < BL_SLOT_COUNT; ++i) {
         const uint32_t base = g_layout.slot[i].base;
-        const uint32_t size = g_layout.slot[i].size;
+        const uint32_t end = base + g_layout.slot[i].size;
 
-        if (addr >= base && addr < base + size) {
-            if (slot_size_out != NULL) {
-                *slot_size_out = size;
+        if (addr >= base && addr < end) {
+            if (slot_base_out != NULL) {
+                *slot_base_out = base;
+            }
+
+            if (slot_end_out != NULL) {
+                *slot_end_out = end;
             }
 
             return true;
@@ -409,9 +429,21 @@ void bl_reset(void)
 
 void bl_jump_to_app(uint32_t base_addr)
 {
-    uint32_t slot_size = 0u;
+    uint32_t slot_base = 0u;
+    uint32_t slot_end = 0u;
 
-    if (!find_slot_for_address(base_addr, &slot_size)) {
+    if (!find_slot_for_address(base_addr, &slot_base, &slot_end)) {
+        return;
+    }
+
+    /*
+     * SCB->VTOR cannot address a vector table that is not aligned to the
+     * next power of two at or above the table's size. The hardware
+     * silently discards the low address bits, so an unaligned table
+     * produces incorrect exception vectors rather than a fault. Reject
+     * the jump here so the condition surfaces during host testing.
+     */
+    if ((base_addr % HOST_VTOR_ALIGNMENT) != 0u) {
         return;
     }
 
@@ -455,10 +487,14 @@ void bl_jump_to_app(uint32_t base_addr)
         return;
     }
 
+    /*
+     * The entry point must lie inside the slot holding the image. An
+     * entry point outside it indicates an image linked for a different
+     * slot, which would execute from the wrong address.
+     */
     const uint32_t reset_addr = reset_vector & ~1u;
 
-    if (reset_addr < base_addr ||
-        reset_addr >= base_addr + slot_size) {
+    if (reset_addr < slot_base || reset_addr >= slot_end) {
         return;
     }
 

@@ -35,32 +35,50 @@ void tearDown(void)
 
 
 /*
- * Write a vector table that bl_jump_to_app() will accept.
- *
- * The port validates four properties, all of which a real Cortex-M image
- * satisfies: the initial MSP lies in SRAM, the MSP is word aligned, the
- * reset vector has the Thumb bit set, and the reset vector points inside
- * the same slot as the image.
+ * Serialise a Cortex-M vector table prologue into a little-endian buffer.
  */
-static void write_valid_vector_table(uint32_t slot_base)
+static void encode_vector_table(uint8_t out[8],
+                                uint32_t initial_msp,
+                                uint32_t reset_vector)
 {
-    const uint32_t initial_msp  = 0x20010000u;
-    const uint32_t reset_vector = (slot_base + 0x100u) | 1u;
+    out[0] = (uint8_t)(initial_msp & 0xFFu);
+    out[1] = (uint8_t)((initial_msp >> 8) & 0xFFu);
+    out[2] = (uint8_t)((initial_msp >> 16) & 0xFFu);
+    out[3] = (uint8_t)((initial_msp >> 24) & 0xFFu);
 
+    out[4] = (uint8_t)(reset_vector & 0xFFu);
+    out[5] = (uint8_t)((reset_vector >> 8) & 0xFFu);
+    out[6] = (uint8_t)((reset_vector >> 16) & 0xFFu);
+    out[7] = (uint8_t)((reset_vector >> 24) & 0xFFu);
+}
+
+
+/*
+ * Write a vector table that bl_jump_to_app() will accept at app_base.
+ *
+ * The port validates five properties, all of which a linked Cortex-M
+ * image satisfies: the base address meets the VTOR alignment
+ * requirement, the initial MSP lies in SRAM, the MSP is word aligned,
+ * the reset vector has the Thumb bit set, and the reset vector points
+ * inside the slot holding the image.
+ */
+static void write_valid_vector_table(uint32_t app_base)
+{
     uint8_t vector_table[8];
 
-    vector_table[0] = (uint8_t)(initial_msp & 0xFFu);
-    vector_table[1] = (uint8_t)((initial_msp >> 8) & 0xFFu);
-    vector_table[2] = (uint8_t)((initial_msp >> 16) & 0xFFu);
-    vector_table[3] = (uint8_t)((initial_msp >> 24) & 0xFFu);
-
-    vector_table[4] = (uint8_t)(reset_vector & 0xFFu);
-    vector_table[5] = (uint8_t)((reset_vector >> 8) & 0xFFu);
-    vector_table[6] = (uint8_t)((reset_vector >> 16) & 0xFFu);
-    vector_table[7] = (uint8_t)((reset_vector >> 24) & 0xFFu);
+    encode_vector_table(vector_table, 0x20010000u, (app_base + 0x100u) | 1u);
 
     TEST_ASSERT_EQUAL(BL_OK,
-        bl_flash_write(slot_base, vector_table, sizeof(vector_table)));
+        bl_flash_write(app_base, vector_table, sizeof(vector_table)));
+}
+
+
+/*
+ * Return the address an application image occupies within a slot.
+ */
+static uint32_t app_base_of(uint8_t slot)
+{
+    return bl_port_layout()->slot[slot].base + BL_IMG_HDR_REGION;
 }
 
 
@@ -93,7 +111,6 @@ void test_init_leaves_flash_erased(void)
  */
 void test_init_clears_all_observable_state(void)
 {
-    const bl_layout_t *layout = bl_port_layout();
     const uint8_t rx[] = { 0x01, 0x02 };
     const uint8_t tx[] = { 0x03 };
 
@@ -103,8 +120,8 @@ void test_init_clears_all_observable_state(void)
     bl_host_time_set(12345u);
     bl_reset();
 
-    write_valid_vector_table(layout->slot[BL_SLOT_A].base);
-    bl_jump_to_app(layout->slot[BL_SLOT_A].base);
+    write_valid_vector_table(app_base_of(BL_SLOT_A));
+    bl_jump_to_app(app_base_of(BL_SLOT_A));
     TEST_ASSERT_TRUE(bl_host_did_jump());
 
     bl_port_init();
@@ -574,11 +591,51 @@ void test_time_wraps_and_subtraction_stays_correct(void)
  */
 void test_jump_is_refused_for_an_erased_slot(void)
 {
-    const bl_layout_t *layout = bl_port_layout();
-
-    bl_jump_to_app(layout->slot[BL_SLOT_A].base);
+    bl_jump_to_app(app_base_of(BL_SLOT_A));
 
     TEST_ASSERT_FALSE(bl_host_did_jump());
+}
+
+
+/*
+ * The application vector table must satisfy the target's VTOR alignment
+ * requirement. An unaligned base is silently truncated by the hardware,
+ * so it must be rejected before the jump rather than producing incorrect
+ * exception vectors at run time.
+ */
+void test_jump_is_refused_for_an_unaligned_base(void)
+{
+    const uint32_t aligned = app_base_of(BL_SLOT_A);
+    const uint32_t unaligned = aligned + 8u;
+
+    uint8_t vector_table[8];
+
+    encode_vector_table(vector_table, 0x20010000u, (unaligned + 0x100u) | 1u);
+
+    TEST_ASSERT_EQUAL(BL_OK,
+        bl_flash_write(unaligned, vector_table, sizeof(vector_table)));
+
+    bl_jump_to_app(unaligned);
+
+    TEST_ASSERT_FALSE(bl_host_did_jump());
+}
+
+
+/*
+ * Both slot bases must be aligned such that an image placed after the
+ * header region satisfies the VTOR alignment requirement. A layout
+ * change that breaks this would otherwise only fail on hardware.
+ */
+void test_layout_supports_aligned_application_bases(void)
+{
+    const bl_layout_t *layout = bl_port_layout();
+
+    for (uint32_t i = 0u; i < BL_SLOT_COUNT; ++i) {
+        const uint32_t app_base = layout->slot[i].base + BL_IMG_HDR_REGION;
+
+        TEST_ASSERT_EQUAL_UINT32(0u, app_base % BL_IMG_HDR_REGION);
+        TEST_ASSERT_GREATER_THAN_UINT32(BL_IMG_HDR_REGION, layout->slot[i].size);
+    }
 }
 
 
@@ -588,15 +645,14 @@ void test_jump_is_refused_for_an_erased_slot(void)
  */
 void test_jump_is_accepted_for_a_plausible_vector_table(void)
 {
-    const bl_layout_t *layout = bl_port_layout();
-    const uint32_t base = layout->slot[BL_SLOT_B].base;
+    const uint32_t app_base = app_base_of(BL_SLOT_B);
 
-    write_valid_vector_table(base);
+    write_valid_vector_table(app_base);
 
-    bl_jump_to_app(base);
+    bl_jump_to_app(app_base);
 
     TEST_ASSERT_TRUE(bl_host_did_jump());
-    TEST_ASSERT_EQUAL_HEX32(base, bl_host_jump_target());
+    TEST_ASSERT_EQUAL_HEX32(app_base, bl_host_jump_target());
 }
 
 
@@ -606,22 +662,17 @@ void test_jump_is_accepted_for_a_plausible_vector_table(void)
  */
 void test_jump_is_refused_without_thumb_bit(void)
 {
-    const bl_layout_t *layout = bl_port_layout();
-    const uint32_t base = layout->slot[BL_SLOT_A].base;
-    const uint32_t reset_vector = base + 0x100u;   /* Thumb bit cleared */
+    const uint32_t app_base = app_base_of(BL_SLOT_A);
 
-    const uint8_t vector_table[8] = {
-        0x00, 0x00, 0x01, 0x20,
-        (uint8_t)(reset_vector & 0xFFu),
-        (uint8_t)((reset_vector >> 8) & 0xFFu),
-        (uint8_t)((reset_vector >> 16) & 0xFFu),
-        (uint8_t)((reset_vector >> 24) & 0xFFu)
-    };
+    uint8_t vector_table[8];
+
+    /* Thumb bit cleared. */
+    encode_vector_table(vector_table, 0x20010000u, app_base + 0x100u);
 
     TEST_ASSERT_EQUAL(BL_OK,
-        bl_flash_write(base, vector_table, sizeof(vector_table)));
+        bl_flash_write(app_base, vector_table, sizeof(vector_table)));
 
-    bl_jump_to_app(base);
+    bl_jump_to_app(app_base);
 
     TEST_ASSERT_FALSE(bl_host_did_jump());
 }
@@ -633,24 +684,19 @@ void test_jump_is_refused_without_thumb_bit(void)
  */
 void test_jump_is_refused_when_reset_vector_leaves_the_slot(void)
 {
-    const bl_layout_t *layout = bl_port_layout();
-    const uint32_t base = layout->slot[BL_SLOT_B].base;
+    const uint32_t app_base = app_base_of(BL_SLOT_B);
 
     /* A valid-looking entry point, but located in slot A. */
-    const uint32_t reset_vector = (layout->slot[BL_SLOT_A].base + 0x100u) | 1u;
+    const uint32_t reset_vector = (app_base_of(BL_SLOT_A) + 0x100u) | 1u;
 
-    const uint8_t vector_table[8] = {
-        0x00, 0x00, 0x01, 0x20,
-        (uint8_t)(reset_vector & 0xFFu),
-        (uint8_t)((reset_vector >> 8) & 0xFFu),
-        (uint8_t)((reset_vector >> 16) & 0xFFu),
-        (uint8_t)((reset_vector >> 24) & 0xFFu)
-    };
+    uint8_t vector_table[8];
+
+    encode_vector_table(vector_table, 0x20010000u, reset_vector);
 
     TEST_ASSERT_EQUAL(BL_OK,
-        bl_flash_write(base, vector_table, sizeof(vector_table)));
+        bl_flash_write(app_base, vector_table, sizeof(vector_table)));
 
-    bl_jump_to_app(base);
+    bl_jump_to_app(app_base);
 
     TEST_ASSERT_FALSE(bl_host_did_jump());
 }
@@ -694,6 +740,7 @@ int main(void)
     RUN_TEST(test_layout_regions_are_page_aligned);
     RUN_TEST(test_layout_regions_do_not_overlap);
     RUN_TEST(test_layout_slots_are_equal_size);
+    RUN_TEST(test_layout_supports_aligned_application_bases);
 
     RUN_TEST(test_erase_restores_erased_state);
     RUN_TEST(test_erase_permits_rewriting);
@@ -719,6 +766,7 @@ int main(void)
     RUN_TEST(test_time_wraps_and_subtraction_stays_correct);
 
     RUN_TEST(test_jump_is_refused_for_an_erased_slot);
+    RUN_TEST(test_jump_is_refused_for_an_unaligned_base);
     RUN_TEST(test_jump_is_accepted_for_a_plausible_vector_table);
     RUN_TEST(test_jump_is_refused_without_thumb_bit);
     RUN_TEST(test_jump_is_refused_when_reset_vector_leaves_the_slot);

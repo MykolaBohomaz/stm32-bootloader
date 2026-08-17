@@ -97,16 +97,26 @@ jobs:
           head -c 4096 /dev/urandom > /tmp/app.bin
           python3 tools/mkimage.py /tmp/app.bin --version 1.2.3
           python3 - <<'PY'
-          import struct, zlib, sys
+          import re
+          import struct
+          import sys
+          import zlib
+
+          # Read the reserved header region size from the C definition so
+          # the two cannot drift apart unnoticed.
+          proto = open('core/include/bl_proto.h').read()
+          match = re.search(r'#define\s+BL_IMG_HDR_REGION\s+(\d+)', proto)
+          assert match, 'BL_IMG_HDR_REGION not found in bl_proto.h'
+          hdr_region = int(match.group(1))
 
           data = open('/tmp/app.blimg', 'rb').read()
-          if len(data) < 40:
-              sys.exit('image shorter than the 40-byte header')
+          if len(data) < hdr_region:
+              sys.exit('image shorter than the reserved header region')
 
           (magic, hdr_ver, flags, img_size,
            img_crc, fw_ver, entry, _, hdr_crc) = struct.unpack(
               '<IHHIIII12sI', data[:40])
-          payload = data[40:]
+          payload = data[hdr_region:]
 
           assert magic == 0x4D494C42, f'bad magic {magic:#x}'
           assert hdr_ver == 1, f'bad header version {hdr_ver}'
@@ -116,5 +126,15 @@ jobs:
           assert hdr_crc == zlib.crc32(data[:36]) & 0xFFFFFFFF, 'bad hdr CRC'
           assert fw_ver == 0x00010203, f'bad version {fw_ver:#x}'
 
-          print('image header OK:', len(data), 'bytes')
+          # entry_offset carries the payload offset so that the bootloader
+          # does not assume a fixed header region size.
+          assert entry == hdr_region, f'entry_offset {entry} != {hdr_region}'
+          assert entry & (entry - 1) == 0, 'entry_offset not a power of two'
+          assert entry >= 128, 'entry_offset below VTOR alignment minimum'
+
+          # The region between the header and the payload must read as
+          # erased flash.
+          assert set(data[40:hdr_region]) <= {0xFF}, 'header padding not 0xFF'
+
+          print('image OK:', len(data), 'bytes, payload at', hdr_region)
           PY

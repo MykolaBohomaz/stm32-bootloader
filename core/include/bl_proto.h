@@ -23,7 +23,16 @@
 #define BL_SOF 0x7Eu
 
 /* Image format identifier: ASCII "BLIM" in little-endian representation. */
-#define BL_IMG_MAGIC 0x4D494C42u 
+#define BL_IMG_MAGIC 0x4D494C42u
+
+/*
+ * Image header format version.
+ *
+ * Versioned independently of BL_PROTO_VERSION: the on-flash image layout
+ * and the host wire protocol evolve separately, and an image written by
+ * an older tool must remain loadable by a newer bootloader.
+ */
+#define BL_IMG_HDR_VERSION 1u
 
 /* Firmware image slots. */
 #define BL_SLOT_A 0
@@ -127,6 +136,10 @@ typedef enum{
     BL_ERR_IMAGE_SIZE = 0x20,
     BL_ERR_IMAGE_CRC = 0x21,
     BL_ERR_ENTRY_OFFSET = 0x22,
+
+    /* Boot selection */
+    BL_ERR_NO_VALID_IMAGE = 0x23, /* No slot holds a bootable image. */
+    BL_ERR_JUMP_REFUSED = 0x24,   /* Image valid, entry point implausible. */
 
     /* Flash operations */
     BL_ERR_FLASH_UNLOCK = 0x30,

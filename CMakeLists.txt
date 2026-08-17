@@ -57,6 +57,7 @@ set(BL_SANITIZER_FLAGS
 add_library(bl_core STATIC
     core/src/bl_crc32.c
     core/src/bl_frame.c
+    core/src/bl_core.c
 )
 
 target_include_directories(bl_core
@@ -146,5 +147,6 @@ if(NOT BL_BUILD_TARGET)
     bl_add_test(crc32)
     bl_add_test(frame)
     bl_add_test(port_host)
+    bl_add_test(core)
 
 endif()

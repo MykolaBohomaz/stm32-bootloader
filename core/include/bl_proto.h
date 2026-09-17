@@ -22,6 +22,16 @@
 #define BL_MAX_PAYLOAD 512u
 #define BL_SOF 0x7Eu
 
+/*
+ * Largest firmware data payload a single WRITE request can carry.
+ *
+ * A WRITE payload is a four-byte destination offset followed by data, so
+ * the data cannot occupy the whole frame payload. The remainder is
+ * rounded down to a whole number of flash write granules, since a
+ * partial granule cannot be programmed.
+ */
+#define BL_MAX_WRITE_DATA (((BL_MAX_PAYLOAD - 4u) / 8u) * 8u)
+
 /* Image format identifier: ASCII "BLIM" in little-endian representation. */
 #define BL_IMG_MAGIC 0x4D494C42u
 
@@ -140,12 +150,14 @@ typedef enum{
     /* Boot selection */
     BL_ERR_NO_VALID_IMAGE = 0x23, /* No slot holds a bootable image. */
     BL_ERR_JUMP_REFUSED = 0x24,   /* Image valid, entry point implausible. */
+    BL_ERR_NO_METADATA = 0x25,    /* No valid boot metadata record exists. */
 
     /* Flash operations */
     BL_ERR_FLASH_UNLOCK = 0x30,
     BL_ERR_FLASH_ERASE = 0x31,
     BL_ERR_FLASH_PROGRAM = 0x32,
     BL_ERR_FLASH_VERIFY = 0x33,
+    BL_ERR_NOT_ERASED = 0x34,     /* Write attempted before erasing a slot. */
 
     /* Communication */
     BL_ERR_TIMEOUT = 0x40,
@@ -155,7 +167,8 @@ typedef enum{
     /* General */
     BL_ERR_NULL_POINTER = 0x50,
     BL_ERR_INVALID_ARGUMENT = 0x51,
-    BL_ERR_UNKNOWN = 0x52
+    BL_ERR_UNKNOWN = 0x52,
+    BL_ERR_NOT_SUPPORTED = 0x53   /* Command recognised but not implemented. */
 } bl_result_t;
 
 #endif // !BL_PROTO_H

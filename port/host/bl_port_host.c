@@ -583,3 +583,43 @@ void bl_host_clear_failures(void)
     g_write_call_count = 0u;
     g_fail_write_from = UINT32_MAX;
 }
+
+void bl_host_reboot(void)
+{
+    /*
+     * Flash and its programmed-byte tracking persist across a reset, so
+     * only volatile state is cleared here.
+     */
+    memset(g_rx, 0, sizeof(g_rx));
+    g_rx_len = 0u;
+    g_rx_pos = 0u;
+
+    memset(g_tx, 0, sizeof(g_tx));
+    g_tx_len = 0u;
+
+    g_time_ms = 0u;
+
+    g_jump_target = 0u;
+    g_jumped = false;
+    g_reset = false;
+
+    g_write_call_count = 0u;
+    g_fail_write_from = UINT32_MAX;
+}
+
+void bl_host_flash_poke(uint32_t addr, const void *data, size_t len)
+{
+    BL_HOST_ASSERT(data != NULL || len == 0u);
+    BL_HOST_ASSERT(flash_range_valid(addr, (uint32_t)len));
+
+    if (len == 0u) {
+        return;
+    }
+
+    /*
+     * Deliberately bypasses the erase-state tracking: this models data
+     * changing underneath the bootloader rather than a program
+     * operation performed by it.
+     */
+    memcpy(&g_flash[flash_offset(addr)], data, len);
+}

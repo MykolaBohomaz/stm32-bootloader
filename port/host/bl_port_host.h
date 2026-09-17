@@ -92,4 +92,33 @@ void bl_host_fail_after_n_writes(uint32_t n);
  */
 void bl_host_clear_failures(void);
 
+/**
+ * @brief Simulate a power cycle.
+ *
+ * Clears every piece of volatile state — transport queues, the clock,
+ * and the recorded reset and jump requests — while leaving flash
+ * contents and programmed-byte tracking intact.
+ *
+ * This is what allows a sequence of boots to be tested: bl_port_init()
+ * would erase the flash that carries boot state between them.
+ */
+void bl_host_reboot(void);
+
+/**
+ * @brief Overwrite simulated flash, bypassing all flash rules.
+ *
+ * Ignores alignment, erase state and programmed-byte tracking. Intended
+ * for constructing states that the normal write path cannot produce,
+ * such as a corrupted record or a bit flip in stored data.
+ *
+ * Must not be used to write data that the code under test is expected to
+ * have written itself; use bl_flash_write() for that, so the contract
+ * checks still apply.
+ *
+ * @param addr Destination flash address.
+ * @param data Source bytes.
+ * @param len Number of bytes to overwrite.
+ */
+void bl_host_flash_poke(uint32_t addr, const void *data, size_t len);
+
 #endif /* BL_PORT_HOST_H */

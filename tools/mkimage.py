@@ -15,20 +15,11 @@ These constants mirror core/include/bl_proto.h and must be kept in sync
 with it; CI validates a generated image against the C definitions.
 """
 
-import struct
 import argparse
 import zlib
 from pathlib import Path
 
-IMG_MAGIC = 0x4D494C42          # ASCII "BLIM", little-endian
-HDR_VERSION = 1
-HDR_STRUCT_SIZE = 40            # sizeof(bl_img_hdr_t)
-HDR_REGION_SIZE = 512           # BL_IMG_HDR_REGION
-WRITE_GRANULARITY = 8           # Target flash programming unit
-PAD_BYTE = 0xFF                 # Matches erased flash
-
-# struct.pack format for bl_img_hdr_t excluding the trailing hdr_crc32.
-HDR_FORMAT_NO_CRC = "<IHHIIII12s"
+import blimage
 
 
 def read_file(file_path):
@@ -45,10 +36,10 @@ def pad_payload(data):
     which in turn lets img_crc32 cover exactly the flash contents.
     """
     data = bytearray(data)
-    remainder = len(data) % WRITE_GRANULARITY
+    remainder = len(data) % blimage.WRITE_GRANULARITY
 
     if remainder != 0:
-        data.extend(bytes([PAD_BYTE]) * (WRITE_GRANULARITY - remainder))
+        data.extend(bytes([blimage.PAD_BYTE]) * (blimage.WRITE_GRANULARITY - remainder))
 
     return bytes(data)
 
@@ -74,44 +65,16 @@ def parse_version(version):
 
     return (major << 16) | (minor << 8) | patch
 
-
-def build_header(img_size, img_crc32, fw_version, entry_offset):
-    """Build the 40-byte image header.
-
-    hdr_crc32 covers the preceding 36 bytes, so the header is packed in
-    two stages: the leading fields are serialised first, checksummed,
-    and the checksum appended.
-    """
-    head = struct.pack(
-        HDR_FORMAT_NO_CRC,
-        IMG_MAGIC,
-        HDR_VERSION,
-        0,                  # flags
-        img_size,
-        img_crc32,
-        fw_version,
-        entry_offset,
-        b"\x00" * 12,       # reserved
-    )
-
-    hdr_crc32 = zlib.crc32(head)
-    header = head + struct.pack("<I", hdr_crc32)
-
-    assert len(header) == HDR_STRUCT_SIZE
-
-    return header, hdr_crc32
-
-
 def build_header_region(header):
     """Pad the header out to the reserved region size.
 
     The padding is filled with the erased-flash value so that the region
     reads identically whether or not it has been programmed.
     """
-    padding = bytes([PAD_BYTE]) * (HDR_REGION_SIZE - len(header))
+    padding = bytes([blimage.PAD_BYTE]) * (blimage.HDR_REGION_SIZE - len(header))
 
     region = header + padding
-    assert len(region) == HDR_REGION_SIZE
+    assert len(region) == blimage.HDR_REGION_SIZE
 
     return region
 
@@ -149,11 +112,11 @@ def main():
     except ValueError as error:
         parser.error(str(error))
 
-    header, hdr_crc32 = build_header(
+    header, hdr_crc32 = blimage.build_header(
         len(payload),
         img_crc32,
         fw_version,
-        HDR_REGION_SIZE,
+        blimage.HDR_REGION_SIZE,
     )
 
     header_region = build_header_region(header)
@@ -165,8 +128,8 @@ def main():
     print("Output:", output_path)
     print("Version:", args.version, f"(0x{fw_version:08X})")
     print("Payload size:", len(payload))
-    print("Header region:", HDR_REGION_SIZE)
-    print("Total size:", HDR_REGION_SIZE + len(payload))
+    print("Header region:", blimage.HDR_REGION_SIZE)
+    print("Total size:", blimage.HDR_REGION_SIZE + len(payload))
     print(f"Image CRC32: 0x{img_crc32:08X}")
     print(f"Header CRC32: 0x{hdr_crc32:08X}")
 

@@ -26,6 +26,10 @@ jobs:
 
       # --output-on-failure prints the failing assertion instead of only
       # reporting which test failed.
+      #
+      # This covers the C suites, the Python tooling tests (which drive
+      # the real core through a shared library), and the constant-sync
+      # check, since all three are registered with CTest.
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
@@ -70,9 +74,11 @@ jobs:
           fi
 
   # -------------------------------------------------------------------------
-  # The Python tooling must at least parse. mkimage.py defines the image
-  # format that the C side reads, so a syntax error here is a broken build
-  # even though no C code depends on it.
+  # The Python tooling implements the other half of the wire protocol and
+  # the image format. Its own tests run inside the CTest suite above, so
+  # this job covers the parts that do not need the compiled core: that
+  # every module parses, and that an image built by mkimage.py is one the
+  # C definitions describe.
   # -------------------------------------------------------------------------
   python-tools:
     name: Python tools
@@ -90,51 +96,27 @@ jobs:
       - name: Byte-compile tools
         run: python -m compileall -q tools/
 
-      # End-to-end check: build an image and verify the header the C side
-      # expects. Catches drift between mkimage.py and bl_proto.h.
-      - name: mkimage produces a valid header
+      # Compares every shared constant against the C headers. Nothing in
+      # either build would otherwise notice a value changing on one side
+      # only; the failure would surface as a corrupt image or an
+      # unintelligible response rather than as a mismatch.
+      - name: Constants match the C headers
+        run: python3 tools/check_sync.py .
+
+      - name: mkimage produces a loadable image
         run: |
           head -c 4096 /dev/urandom > /tmp/app.bin
           python3 tools/mkimage.py /tmp/app.bin --version 1.2.3
-          python3 - <<'PY'
-          import re
-          import struct
-          import sys
-          import zlib
+          PYTHONPATH=tools python3 - <<'PY'
+          import blimage
 
-          # Read the reserved header region size from the C definition so
-          # the two cannot drift apart unnoticed.
-          proto = open('core/include/bl_proto.h').read()
-          match = re.search(r'#define\s+BL_IMG_HDR_REGION\s+(\d+)', proto)
-          assert match, 'BL_IMG_HDR_REGION not found in bl_proto.h'
-          hdr_region = int(match.group(1))
+          image = open('/tmp/app.blimg', 'rb').read()
+          header = blimage.validate(image)
 
-          data = open('/tmp/app.blimg', 'rb').read()
-          if len(data) < hdr_region:
-              sys.exit('image shorter than the reserved header region')
+          assert header.entry_offset == blimage.HDR_REGION_SIZE
+          assert header.fw_version == 0x00010203
+          assert set(image[40:blimage.HDR_REGION_SIZE]) <= {0xFF}
 
-          (magic, hdr_ver, flags, img_size,
-           img_crc, fw_ver, entry, _, hdr_crc) = struct.unpack(
-              '<IHHIIII12sI', data[:40])
-          payload = data[hdr_region:]
-
-          assert magic == 0x4D494C42, f'bad magic {magic:#x}'
-          assert hdr_ver == 1, f'bad header version {hdr_ver}'
-          assert img_size == len(payload), f'{img_size} != {len(payload)}'
-          assert img_size % 8 == 0, 'payload not padded to a granule'
-          assert img_crc == zlib.crc32(payload) & 0xFFFFFFFF, 'bad img CRC'
-          assert hdr_crc == zlib.crc32(data[:36]) & 0xFFFFFFFF, 'bad hdr CRC'
-          assert fw_ver == 0x00010203, f'bad version {fw_ver:#x}'
-
-          # entry_offset carries the payload offset so that the bootloader
-          # does not assume a fixed header region size.
-          assert entry == hdr_region, f'entry_offset {entry} != {hdr_region}'
-          assert entry & (entry - 1) == 0, 'entry_offset not a power of two'
-          assert entry >= 128, 'entry_offset below VTOR alignment minimum'
-
-          # The region between the header and the payload must read as
-          # erased flash.
-          assert set(data[40:hdr_region]) <= {0xFF}, 'header padding not 0xFF'
-
-          print('image OK:', len(data), 'bytes, payload at', hdr_region)
+          print('image OK:', len(image), 'bytes, payload at',
+                header.entry_offset)
           PY

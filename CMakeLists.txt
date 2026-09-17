@@ -152,4 +152,65 @@ if(NOT BL_BUILD_TARGET)
     bl_add_test(core)
     bl_add_test(session)
 
+    # --- Simulated device shared library ------------------------------------
+    #
+    # Lets tools/blflash.py be exercised against the real bootloader core
+    # instead of a Python reimplementation of it. The protocol has no
+    # external specification, so driving the actual firmware logic is the
+    # only way to confirm the two implementations agree.
+    #
+    # Built from the same sources as the test targets but deliberately
+    # WITHOUT sanitizers: the library is loaded into a plain Python process
+    # via ctypes, and the AddressSanitizer runtime cannot be introduced by
+    # dlopen after the process has started.
+    add_library(bl_sim SHARED
+        core/src/bl_crc32.c
+        core/src/bl_frame.c
+        core/src/bl_meta.c
+        core/src/bl_core.c
+        port/host/bl_port_host.c
+        sim/bl_sim.c
+    )
+
+    target_include_directories(bl_sim
+        PRIVATE
+            core/include
+            port/host
+    )
+
+    target_compile_options(bl_sim
+        PRIVATE
+            ${BL_WARNING_FLAGS}
+    )
+
+    set_target_properties(bl_sim PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+    )
+
+    # --- Python tests -------------------------------------------------------
+    #
+    # Registered with CTest so a single `ctest` run covers both sides of
+    # the protocol.
+    find_package(Python3 COMPONENTS Interpreter)
+
+    if(Python3_FOUND)
+        add_test(
+            NAME python_tools
+            COMMAND ${Python3_EXECUTABLE} -m unittest discover
+                    -s ${CMAKE_SOURCE_DIR}/tests -p "test_*.py" -v
+        )
+
+        set_tests_properties(python_tools PROPERTIES
+            ENVIRONMENT
+                "PYTHONPATH=${CMAKE_SOURCE_DIR}/tools;BL_SIM_LIB=$<TARGET_FILE:bl_sim>"
+        )
+
+        add_test(
+            NAME constants_in_sync
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_SOURCE_DIR}/tools/check_sync.py
+                    ${CMAKE_SOURCE_DIR}
+        )
+    endif()
+
 endif()

@@ -131,6 +131,15 @@ bl_result_t bl_core_mark_pending(uint8_t slot);
  */
 bl_result_t bl_core_confirm(void);
 
+/*
+ * Smallest response buffer bl_core_handle_frame() can be called with.
+ *
+ * A response is a frame carrying a status byte and, for HELLO, the
+ * largest command-specific data field. Supplying less is reported as a
+ * failure rather than producing a truncated frame.
+ */
+#define BL_MIN_RESPONSE_SIZE 29u
+
 /**
  * @brief Handle one decoded bootloader protocol request.
  *

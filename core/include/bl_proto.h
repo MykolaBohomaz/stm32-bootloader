@@ -51,6 +51,17 @@
 #define BL_META_COUNT 2u
 
 /*
+ * Reported in place of a slot identifier or boot state when the device
+ * holds no boot metadata, which is its condition before the first update
+ * and after the metadata regions are erased.
+ *
+ * 0xFF is the erased-flash value and is not a valid slot or state, so it
+ * cannot be confused with a real one.
+ */
+#define BL_SLOT_NONE 0xFFu
+#define BL_BOOT_STATE_NONE 0xFFu
+
+/*
  * Reserved header region size.
  *
  * An image occupies a slot as:

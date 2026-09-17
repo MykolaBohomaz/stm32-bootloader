@@ -288,6 +288,34 @@ void test_handler_reports_an_undersized_response_buffer(void)
 
 
 /*
+ * BL_MIN_RESPONSE_SIZE is the buffer size callers are told to provide,
+ * so the largest response must fit in exactly that much and no less.
+ */
+void test_minimum_response_size_is_exact(void)
+{
+    bl_frame_t frame;
+
+    memset(&frame, 0, sizeof(frame));
+    frame.cmd = BL_CMD_HELLO;
+    frame.len = 0u;
+
+    uint8_t exact[BL_MIN_RESPONSE_SIZE];
+
+    TEST_ASSERT_EQUAL(BL_OK,
+        bl_core_handle_frame(&session, &frame, exact, sizeof(exact),
+                             &response_len));
+
+    TEST_ASSERT_EQUAL_UINT(BL_MIN_RESPONSE_SIZE, response_len);
+
+    uint8_t one_short[BL_MIN_RESPONSE_SIZE - 1u];
+
+    TEST_ASSERT_NOT_EQUAL(BL_OK,
+        bl_core_handle_frame(&session, &frame, one_short, sizeof(one_short),
+                             &response_len));
+}
+
+
+/*
  * An unrecognised command must be answered, with its command byte
  * echoed, so the host can distinguish rejection from an unresponsive
  * device.
@@ -316,7 +344,7 @@ void test_hello_reports_device_geometry(void)
 
     TEST_ASSERT_EQUAL(BL_OK, exchange(BL_CMD_HELLO, NULL, 0u, &frame));
 
-    TEST_ASSERT_EQUAL_UINT16(18u, frame.len);
+    TEST_ASSERT_EQUAL_UINT16(21u, frame.len);
     TEST_ASSERT_EQUAL_UINT8(BL_OK, frame.payload[0]);
     TEST_ASSERT_EQUAL_UINT8(BL_PROTO_VERSION, frame.payload[1]);
     TEST_ASSERT_EQUAL_UINT8(BL_IMG_HDR_VERSION, frame.payload[2]);
@@ -340,6 +368,80 @@ void test_hello_reports_device_geometry(void)
     TEST_ASSERT_EQUAL_UINT16(BL_MAX_WRITE_DATA, max_write);
     TEST_ASSERT_TRUE((uint32_t)max_write + 4u <= BL_MAX_PAYLOAD);
     TEST_ASSERT_EQUAL_UINT32(0u, max_write % bl_flash_write_granularity());
+}
+
+
+/*
+ * A device with no metadata must say so rather than naming a slot the
+ * host would then treat as the one to preserve.
+ */
+void test_hello_reports_no_active_slot_when_metadata_is_absent(void)
+{
+    bl_frame_t frame;
+
+    TEST_ASSERT_EQUAL(BL_OK, exchange(BL_CMD_HELLO, NULL, 0u, &frame));
+
+    TEST_ASSERT_EQUAL_HEX8(BL_SLOT_NONE, frame.payload[18]);
+    TEST_ASSERT_EQUAL_HEX8(BL_BOOT_STATE_NONE, frame.payload[19]);
+}
+
+
+/*
+ * The host chooses an update target from the reported active slot:
+ * erasing the slot that would currently boot removes the only fallback.
+ */
+void test_hello_reports_the_active_slot(void)
+{
+    update_slot_via_protocol(BL_SLOT_B, 0x00020000u);
+    TEST_ASSERT_EQUAL(BL_OK, bl_core_mark_pending(BL_SLOT_B));
+
+    bl_frame_t frame;
+
+    TEST_ASSERT_EQUAL(BL_OK, exchange(BL_CMD_HELLO, NULL, 0u, &frame));
+
+    TEST_ASSERT_EQUAL_UINT8(BL_SLOT_B, frame.payload[18]);
+    TEST_ASSERT_EQUAL_UINT8(BL_BOOT_TRIAL, frame.payload[19]);
+    TEST_ASSERT_EQUAL_UINT8(0u, frame.payload[20]);
+}
+
+
+/*
+ * Trial progress is visible to the host, so an operator can see that an
+ * image is on its way to being reverted.
+ */
+void test_hello_reports_trial_progress(void)
+{
+    update_slot_via_protocol(BL_SLOT_A, 0x00010000u);
+    TEST_ASSERT_EQUAL(BL_OK, bl_core_mark_pending(BL_SLOT_A));
+
+    bl_host_reboot();
+    (void)bl_core_boot();
+
+    bl_frame_t frame;
+
+    TEST_ASSERT_EQUAL(BL_OK, exchange(BL_CMD_HELLO, NULL, 0u, &frame));
+
+    TEST_ASSERT_EQUAL_UINT8(BL_SLOT_A, frame.payload[18]);
+    TEST_ASSERT_EQUAL_UINT8(BL_BOOT_TRIAL, frame.payload[19]);
+    TEST_ASSERT_EQUAL_UINT8(1u, frame.payload[20]);
+}
+
+
+/*
+ * After confirmation the reported state must no longer indicate a trial.
+ */
+void test_hello_reports_a_confirmed_image(void)
+{
+    update_slot_via_protocol(BL_SLOT_A, 0x00010000u);
+    TEST_ASSERT_EQUAL(BL_OK, bl_core_mark_pending(BL_SLOT_A));
+    TEST_ASSERT_EQUAL(BL_OK, bl_core_confirm());
+
+    bl_frame_t frame;
+
+    TEST_ASSERT_EQUAL(BL_OK, exchange(BL_CMD_HELLO, NULL, 0u, &frame));
+
+    TEST_ASSERT_EQUAL_UINT8(BL_SLOT_A, frame.payload[18]);
+    TEST_ASSERT_EQUAL_UINT8(BL_BOOT_CONFIRMED, frame.payload[19]);
 }
 
 
@@ -1033,9 +1135,14 @@ int main(void)
 
     RUN_TEST(test_handler_rejects_null_arguments);
     RUN_TEST(test_handler_reports_an_undersized_response_buffer);
+    RUN_TEST(test_minimum_response_size_is_exact);
     RUN_TEST(test_unknown_command_is_rejected_with_the_command_echoed);
 
     RUN_TEST(test_hello_reports_device_geometry);
+    RUN_TEST(test_hello_reports_no_active_slot_when_metadata_is_absent);
+    RUN_TEST(test_hello_reports_the_active_slot);
+    RUN_TEST(test_hello_reports_trial_progress);
+    RUN_TEST(test_hello_reports_a_confirmed_image);
     RUN_TEST(test_hello_write_size_fits_in_a_frame);
     RUN_TEST(test_hello_rejects_a_payload);
 

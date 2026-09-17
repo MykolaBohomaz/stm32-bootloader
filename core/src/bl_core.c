@@ -14,7 +14,7 @@
 #define BL_CRC_CHUNK 256u
 
 /* Largest response data field produced by any command (HELLO). */
-#define BL_MAX_RESPONSE_DATA 17u
+#define BL_MAX_RESPONSE_DATA 20u
 
 
 /* ------------------------------------------------------------------ */
@@ -291,6 +291,14 @@ static void advance_trial_state(void)
         return;
     }
 
+    /*
+     * A failed metadata commit is deliberately not propagated. Boot
+     * continues either way: the counter simply does not advance, so a
+     * failing image is granted further attempts rather than the device
+     * refusing to start. Flash that cannot be written is a fault the
+     * bootloader cannot repair, and declining to boot would remove the
+     * operator's ability to recover over the update interface.
+     */
     if (meta.boot_attempts < BL_MAX_BOOT_ATTEMPTS) {
         (void)bl_meta_commit(meta.active_slot,
                              (uint8_t)BL_BOOT_TRIAL,
@@ -399,7 +407,7 @@ static bl_result_t handle_hello(uint8_t cmd,
 
     const bl_layout_t *layout = bl_port_layout();
 
-    uint8_t data[17];
+    uint8_t data[20];
 
     /*
      * The protocol version is first so that a host may read it, decide
@@ -420,6 +428,28 @@ static bl_result_t handle_hello(uint8_t cmd,
      */
     data[15] = (uint8_t)(BL_MAX_WRITE_DATA & 0xFFu);
     data[16] = (uint8_t)((BL_MAX_WRITE_DATA >> 8) & 0xFFu);
+
+    /*
+     * Current boot state.
+     *
+     * The host needs the active slot to choose an update target: erasing
+     * the slot that would currently boot removes the only fallback, so
+     * an interrupted update would leave the device with nothing to run.
+     *
+     * A device with no metadata reports BL_SLOT_NONE. The host must then
+     * treat both slots as potentially bootable and decide using VERIFY.
+     */
+    bl_meta_t meta;
+
+    if (bl_meta_read(&meta) == BL_OK) {
+        data[17] = meta.active_slot;
+        data[18] = meta.state;
+        data[19] = meta.boot_attempts;
+    } else {
+        data[17] = BL_SLOT_NONE;
+        data[18] = BL_BOOT_STATE_NONE;
+        data[19] = 0u;
+    }
 
     return respond(cmd, BL_OK, data, (uint16_t)sizeof(data),
                    response, response_size, response_len);

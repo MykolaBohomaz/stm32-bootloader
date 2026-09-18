@@ -46,6 +46,29 @@ static bool slot_is_valid(uint8_t slot)
 
 
 /*
+ * Confirm that a region can be erased without disturbing its
+ * neighbours.
+ *
+ * Flash erases whole pages, so a region whose base or size is not a
+ * multiple of the erase granularity shares a page with whatever
+ * follows it. Erasing such a region would destroy part of an adjacent
+ * one — on the target, silently. The condition depends on the port's
+ * layout rather than on anything the host sends, so it is checked
+ * before any erase rather than assumed.
+ */
+static bool region_is_erasable(uint32_t base, uint32_t size)
+{
+    const uint32_t granularity = bl_flash_erase_granularity(base);
+
+    if (granularity == 0u) {
+        return false;
+    }
+
+    return (base % granularity) == 0u && (size % granularity) == 0u;
+}
+
+
+/*
  * Encode a response frame carrying a status byte and optional data.
  *
  * Every command path returns through this function, which is what
@@ -172,7 +195,13 @@ bl_result_t bl_core_validate_slot(uint8_t slot, bl_img_hdr_t *hdr_out)
             return result;
         }
 
-        payload_crc = bl_crc32(payload_crc, buffer, chunk);
+        /*
+         * Bulk checksums go through the port so a target with a CRC
+         * peripheral can accelerate them. This runs on every boot over
+         * the whole image, which is the only checksum in the bootloader
+         * large enough for the difference to matter.
+         */
+        payload_crc = bl_port_crc32(payload_crc, buffer, chunk);
         address += chunk;
         remaining -= chunk;
     }
@@ -476,9 +505,15 @@ static bl_result_t handle_erase_slot(bl_session_t *session,
     }
 
     const bl_layout_t *layout = bl_port_layout();
+    const uint32_t base = layout->slot[slot].base;
+    const uint32_t size = layout->slot[slot].size;
 
-    const bl_result_t result =
-        bl_flash_erase(layout->slot[slot].base, layout->slot[slot].size);
+    if (!region_is_erasable(base, size)) {
+        return respond(cmd, BL_ERR_INVALID_ARGUMENT, NULL, 0u,
+                       response, response_size, response_len);
+    }
+
+    const bl_result_t result = bl_flash_erase(base, size);
 
     if (result != BL_OK) {
         return respond(cmd, result, NULL, 0u,

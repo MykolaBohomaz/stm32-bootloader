@@ -59,6 +59,7 @@ add_library(bl_core STATIC
     core/src/bl_frame.c
     core/src/bl_meta.c
     core/src/bl_core.c
+    core/src/bl_api.c
 )
 
 target_include_directories(bl_core
@@ -151,6 +152,7 @@ if(NOT BL_BUILD_TARGET)
     bl_add_test(meta)
     bl_add_test(core)
     bl_add_test(session)
+    bl_add_test(api)
 
     # --- Simulated device shared library ------------------------------------
     #
@@ -168,6 +170,7 @@ if(NOT BL_BUILD_TARGET)
         core/src/bl_frame.c
         core/src/bl_meta.c
         core/src/bl_core.c
+        core/src/bl_api.c
         port/host/bl_port_host.c
         sim/bl_sim.c
     )

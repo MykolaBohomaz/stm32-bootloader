@@ -131,6 +131,30 @@ uint32_t bl_flash_write_granularity(void);
 uint32_t bl_flash_erase_granularity(uint32_t addr);
 
 /**
+ * @brief Compute a running CRC-32 over bulk data.
+ *
+ * Must implement CRC-32/ISO-HDLC with the same running-value semantics
+ * as bl_crc32(): a caller starts with 0, feeds consecutive blocks, and
+ * obtains the checksum of their concatenation. A port with no hardware
+ * accelerator should simply call bl_crc32().
+ *
+ * Exists because boot validation checksums an entire firmware image on
+ * every start. A software implementation costs tens of milliseconds on
+ * a 108 KiB image; a target with a CRC peripheral can do the same work
+ * in about one. Only bulk data goes through this function — frame and
+ * header checksums stay on bl_crc32(), since they cover a few dozen
+ * bytes and are accumulated a byte at a time, which does not suit a
+ * stateful peripheral.
+ *
+ * @param crc Running value; 0 to start a new checksum.
+ * @param data Bytes to include.
+ * @param len Number of bytes.
+ *
+ * @return The updated running value.
+ */
+uint32_t bl_port_crc32(uint32_t crc, const void *data, uint32_t len);
+
+/**
  * @brief Read one byte from the bootloader transport.
  *
  * The function waits until a byte is received or timeout_ms expires.

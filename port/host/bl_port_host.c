@@ -1,3 +1,4 @@
+#include "bl_crc32.h"
 #include "bl_port.h"
 #include "bl_port_host.h"
 
@@ -369,6 +370,17 @@ uint32_t bl_flash_erase_granularity(uint32_t addr)
     );
 
     return HOST_ERASE_GRANULARITY;
+}
+
+uint32_t bl_port_crc32(uint32_t crc, const void *data, uint32_t len)
+{
+    /*
+     * The host has no CRC accelerator, so this delegates to the
+     * software implementation. A target port may substitute hardware
+     * provided it produces identical values; the shared check vector in
+     * tests/test_crc32.c is what pins both to CRC-32/ISO-HDLC.
+     */
+    return bl_crc32(crc, data, len);
 }
 
 bl_result_t bl_transport_read_byte(uint8_t *out, uint32_t timeout_ms)

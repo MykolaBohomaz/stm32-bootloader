@@ -36,6 +36,10 @@ DEFINE_MAP = {
     "blimage.HDR_VERSION": "BL_IMG_HDR_VERSION",
     "blimage.HDR_REGION_SIZE": "BL_IMG_HDR_REGION",
     "blimage.VTOR_MIN_ALIGNMENT": "BL_VTOR_MIN_ALIGNMENT",
+    "blproto.API_MAGIC": "BL_API_MAGIC",
+    "blproto.API_VERSION": "BL_API_VERSION",
+    "blproto.API_ADDRESS": "BL_API_ADDRESS",
+    "blproto.MAX_BOOT_ATTEMPTS": "BL_MAX_BOOT_ATTEMPTS",
 }
 
 # Python name -> C enumerator, for enum members.
@@ -150,7 +154,7 @@ def main():
     include = root / "core" / "include"
 
     sources = [include / "bl_proto.h", include / "bl_meta.h",
-               include / "bl_core.h"]
+               include / "bl_core.h", include / "bl_api.h"]
 
     text = ""
 

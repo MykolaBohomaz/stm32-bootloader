@@ -145,6 +145,20 @@ bl_result_t bl_meta_commit(uint8_t active_slot,
     const uint32_t base = layout->meta[target_index].base;
     const uint32_t size = layout->meta[target_index].size;
 
+    /*
+     * A metadata region that is not page-aligned shares an erase page
+     * with a neighbour, so committing a record would destroy part of
+     * it. The layout comes from the port, not from the host, so the
+     * condition is verified rather than assumed.
+     */
+    const uint32_t granularity = bl_flash_erase_granularity(base);
+
+    if (granularity == 0u ||
+        (base % granularity) != 0u ||
+        (size % granularity) != 0u) {
+        return BL_ERR_INVALID_ARGUMENT;
+    }
+
     bl_result_t result = bl_flash_erase(base, size);
     if (result != BL_OK) {
         return result;

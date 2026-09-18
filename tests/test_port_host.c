@@ -622,6 +622,36 @@ void test_jump_is_refused_for_an_unaligned_base(void)
 
 
 /*
+ * Every programmable region must be erasable without disturbing its
+ * neighbours. A region sharing an erase page with another would be
+ * partially destroyed whenever its neighbour was erased, silently on
+ * the target.
+ */
+void test_layout_regions_are_independently_erasable(void)
+{
+    const bl_layout_t *layout = bl_port_layout();
+
+    for (uint32_t i = 0u; i < BL_SLOT_COUNT; ++i) {
+        const uint32_t granularity =
+            bl_flash_erase_granularity(layout->slot[i].base);
+
+        TEST_ASSERT_GREATER_THAN_UINT32(0u, granularity);
+        TEST_ASSERT_EQUAL_UINT32(0u, layout->slot[i].base % granularity);
+        TEST_ASSERT_EQUAL_UINT32(0u, layout->slot[i].size % granularity);
+    }
+
+    for (uint32_t i = 0u; i < BL_META_COUNT; ++i) {
+        const uint32_t granularity =
+            bl_flash_erase_granularity(layout->meta[i].base);
+
+        TEST_ASSERT_GREATER_THAN_UINT32(0u, granularity);
+        TEST_ASSERT_EQUAL_UINT32(0u, layout->meta[i].base % granularity);
+        TEST_ASSERT_EQUAL_UINT32(0u, layout->meta[i].size % granularity);
+    }
+}
+
+
+/*
  * Both slot bases must be aligned such that an image placed after the
  * header region satisfies the VTOR alignment requirement. A layout
  * change that breaks this would otherwise only fail on hardware.
@@ -741,6 +771,7 @@ int main(void)
     RUN_TEST(test_layout_regions_do_not_overlap);
     RUN_TEST(test_layout_slots_are_equal_size);
     RUN_TEST(test_layout_supports_aligned_application_bases);
+    RUN_TEST(test_layout_regions_are_independently_erasable);
 
     RUN_TEST(test_erase_restores_erased_state);
     RUN_TEST(test_erase_permits_rewriting);

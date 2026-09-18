@@ -38,6 +38,15 @@ BOOT_STATE_NONE = 0xFF
 BOOT_CONFIRMED = 0x01
 BOOT_TRIAL = 0x02
 
+# Services the bootloader publishes to the running application, at a
+# fixed address in its own flash region. Mirrors core/include/bl_api.h.
+API_MAGIC = 0x49504142
+API_VERSION = 1
+API_ADDRESS = 0x08000200
+
+# Boots a trial image is granted before the bootloader reverts.
+MAX_BOOT_ATTEMPTS = 3
+
 CMD_HELLO = 0x01
 CMD_ERASE_SLOT = 0x02
 CMD_WRITE = 0x03
